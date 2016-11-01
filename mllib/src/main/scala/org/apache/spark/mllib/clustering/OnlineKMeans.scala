@@ -62,14 +62,13 @@ class OnlineKMeans private (
     val sc = data.sparkContext
     val centers = data.takeSample(true, k, new XORShiftRandom(this.seed).nextInt()).map(_.toDense)
     val dims = centers.head.vector.size
-
     val bcCenters = sc.broadcast(centers)
 
     val finalCenters = data.mapPartitions { points =>
       val thisCenters = bcCenters.value
 
       val centersValue = Array.fill(thisCenters.length)(Vectors.zeros(dims))
-      val counts = Array.fill(thisCenters.length)(0L)
+      val counts = Array.fill(thisCenters.length)(0.0)
 
       points.foreach{ point =>
         val (bestCenter, cost) = KMeans.findClosest(thisCenters, point)
