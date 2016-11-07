@@ -22,7 +22,6 @@ import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 import org.apache.spark.mllib.util.TestingUtils._
 
-
 class OnlineKMeansSuite extends SparkFunSuite with MLlibTestSparkContext{
 
   test("Base case online K-means clustering") {
