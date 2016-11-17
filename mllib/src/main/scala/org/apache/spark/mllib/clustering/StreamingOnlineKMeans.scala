@@ -47,10 +47,11 @@ class StreamingOnlineKMeansModel(
       pointsInfo.foreach{ pointsPerCenterInfo =>
         val centerIndex = pointsPerCenterInfo._1
         val points = pointsPerCenterInfo._2
+        counts(centerIndex) = localWeights(centerIndex)
 
         points.foreach{ point =>
 
-          val center = centersValue(centerIndex)
+          val center = localCenters(centerIndex)
           counts(centerIndex) += 1
 
           // add the contribution of one point
@@ -59,6 +60,7 @@ class StreamingOnlineKMeansModel(
           axpy(-1.0, center, contrib)
           scal(1.0/counts(centerIndex), contrib)
           axpy(1.0, contrib, center)
+          centersValue(centerIndex) = center
         }
 
       }
