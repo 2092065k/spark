@@ -26,8 +26,7 @@ import org.apache.spark.util.random.XORShiftRandom
 
 class StreamingOnlineKMeansModel(
     override val clusterCenters: Array[Vector],
-    val clusterWeights: Array[Double],
-    val seed: Long) extends KMeansModel(clusterCenters) with Logging {
+    val clusterWeights: Array[Double]) extends KMeansModel(clusterCenters) with Logging {
 
   def update(data: RDD[Vector]): StreamingOnlineKMeansModel = {
 
@@ -89,7 +88,7 @@ class StreamingOnlineKMeans (
     var k: Int,
     var seed: Long)  extends Logging with Serializable {
 
-  protected var model = new StreamingOnlineKMeansModel(null, null, seed)
+  protected var model = new StreamingOnlineKMeansModel(null, null)
 
   def getK: Int = k
 
@@ -115,7 +114,7 @@ class StreamingOnlineKMeans (
       s"Number of initial centers must be ${k} but got ${centers.size}")
     require(weights.forall(_ >= 0),
       s"Weight for each inital center must be nonnegative but got [${weights.mkString(" ")}]")
-    model = new StreamingOnlineKMeansModel(centers, weights, seed)
+    model = new StreamingOnlineKMeansModel(centers, weights)
     this
   }
 
@@ -126,8 +125,7 @@ class StreamingOnlineKMeans (
       if (model.clusterWeights == null) {
         model = new StreamingOnlineKMeansModel(
           rdd.takeSample(true, k, new XORShiftRandom(this.seed).nextInt()).map(_.toDense),
-          Array.fill(k)(0.0),
-          seed)
+          Array.fill(k)(0.0))
       }
       model = model.update(rdd)
     }

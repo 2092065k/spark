@@ -35,7 +35,7 @@ class ARTKMeansSuite extends SparkFunSuite with MLlibTestSparkContext{
 
     val percentageOfSpace = 0.3
     val model = ARTKMeans.train(data, percentageOfSpace)
-    
+
     val firstCenter = Vectors.dense(1.0, 1.0, 1.0)
     val secondCenter = Vectors.dense(9.0, 9.0, 9.0)
 
