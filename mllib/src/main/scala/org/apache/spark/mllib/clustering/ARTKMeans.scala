@@ -17,8 +17,6 @@
 
 package org.apache.spark.mllib.clustering
 
-import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{DenseVector, Vector, Vectors}
 import org.apache.spark.mllib.linalg.BLAS.{axpy, scal}
@@ -94,71 +92,50 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     distArray.sum
   }
 
-  private def getClosestCenterPairInfo(point: VectorWithNorm): (Int, Double) = {
-    val consideredCenters: ArrayBuffer[VectorWithNorm] = ArrayBuffer(clusterCenters : _*)
-    consideredCenters.remove(consideredCenters.indexOf(point))
-
-    val (closestCenterIndex, distance) = KMeans.findClosest(consideredCenters, point)
-    val closestCenter = consideredCenters(closestCenterIndex)
-
-    (clusterCenters.indexOf(closestCenter), distance)
-  }
-  
+  /**
+    * Combination of the centers works through performing a sequential
+    * ARTKMeans clustering on the center points themselves
+    */
   private def combineCenters(max: Vector, min: Vector, a: Double) {
 
-    val newClusterCenters: ArrayBuffer[VectorWithNorm] = ArrayBuffer(clusterCenters : _*)
-    val newClusterWeights: ArrayBuffer[Double] = ArrayBuffer(clusterWeights : _*)
-    var closestCenterPairs: ArrayBuffer[((Int, Double), VectorWithNorm)] = ArrayBuffer()
+    var newClusterCenters: Array[VectorWithNorm] = Array()
+    var newClusterWeights: Array[Double] = Array()
     val dims = clusterCenters(0).vector.size
     val vigilance = a * dims
-    var combinationNeeded = true
 
-    while(combinationNeeded && newClusterCenters.length > 1) {
-      closestCenterPairs = newClusterCenters.map(center =>
-        (getClosestCenterPairInfo(center), center)
-      )
+    // take one of the old centers as an initial center
+    newClusterCenters = newClusterCenters :+ clusterCenters(0)
+    newClusterWeights = newClusterWeights :+ 0.0
 
-      val closestPair = closestCenterPairs.reduce{ (a, b) =>
-        if (a._1._2 < b._1._2) a
-        else b
-      }
+    clusterCenters.zipWithIndex.foreach{ case(point, index) =>
 
-      val element1 = closestPair._2
-      val element2 = newClusterCenters(closestPair._1._1)
-      val element1Index = newClusterCenters.indexOf(element1)
-      val element2Index = newClusterCenters.indexOf(element2)
-      val center1 = element1.vector
-      val center2 = element2.vector
+      val (bestCenter, distance) = KMeans.findClosest(newClusterCenters, point)
+      val closestCenter = newClusterCenters(bestCenter).vector
+      val normalizedPoint = normalizeVector(point.vector, max, min)
+      val normalizedCenter = normalizeVector(closestCenter, max, min)
+      val dist = distanceBetweenVectors(normalizedPoint, normalizedCenter)
 
-      val normalizedCenter1 = normalizeVector(center1, max, min)
-      val normalizedCenter2 = normalizeVector(center2, max, min)
-      val dist = distanceBetweenVectors(normalizedCenter1, normalizedCenter2)
+      if(dist < vigilance) {
 
-      if (dist < vigilance) {
+        val newWeight = newClusterWeights(bestCenter) + clusterWeights(index)
 
-        // compute new combined center and insert it along with its new weight
-        val newCenter = new DenseVector(Array.fill(dims)(0.0))
-        axpy(1.0, center1, newCenter)
-        axpy(1.0, center2, newCenter)
-        scal(0.5, newCenter)
-        newClusterCenters += new VectorWithNorm(newCenter)
-        newClusterWeights += newClusterWeights(element1Index) + newClusterWeights(element2Index)
-
-        // remove info for the two combined centers
-        newClusterCenters.remove(element1Index)
-        newClusterCenters.remove(element2Index)
-        newClusterWeights.remove(element1Index)
-        newClusterWeights.remove(element2Index)
+        // check is necessary to overcome initial center placement
+        if(newWeight != 0) {
+          val contrib = new DenseVector(Array.fill(dims)(0.0))
+          axpy(clusterWeights(index) / newWeight, point.vector, contrib)
+          scal(newClusterWeights(bestCenter) / newWeight, closestCenter)
+          axpy(1.0, contrib, closestCenter)
+          newClusterWeights(bestCenter) = newWeight
+        }
       }
       else {
-
-        // the two closest centers are further away than the vigilance
-        combinationNeeded = false
+        newClusterCenters = newClusterCenters :+ point
+        newClusterWeights = newClusterWeights :+ clusterWeights(index)
       }
     }
 
-    clusterCenters = newClusterCenters.toArray
-    clusterWeights = newClusterWeights.toArray
+    clusterCenters = newClusterCenters
+    clusterWeights = newClusterWeights
 
   }
 
