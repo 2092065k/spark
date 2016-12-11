@@ -18,30 +18,39 @@
 package org.apache.spark.mllib.clustering
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.util.MLlibTestSparkContext
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.util.TestingUtils._
+import org.apache.spark.streaming.{StreamingContext, TestSuiteBase}
+import org.apache.spark.streaming.dstream.DStream
 
-class ARTKMeansSuite extends SparkFunSuite with MLlibTestSparkContext{
+class ARTKMeansSuite extends SparkFunSuite with TestSuiteBase{
 
   test("Base case ART K-means clustering") {
 
-    val data = sc.parallelize(Seq(
+    val data = Seq(
       Vectors.dense(0.0, 0.0, 0.0),
       Vectors.dense(2.0, 2.0, 2.0),
       Vectors.dense(8.0, 8.0, 8.0),
       Vectors.dense(10.0, 10.0, 10.0)
-    ))
+    )
 
     val percentageOfSpace = 0.3
-    val model = ARTKMeans.train(data, percentageOfSpace)
+    val model = new ARTKMeans(percentageOfSpace)
+
+    val scc: StreamingContext = setupStreams(Seq(data), (inputDStream: DStream[Vector]) => {
+      model.trainOn(inputDStream)
+      inputDStream.count()
+    })
+
+    runStreams(scc, 1, 1)
+    val finalCenters = model.latestModel().clusterCenters
 
     val firstCenter = Vectors.dense(1.0, 1.0, 1.0)
     val secondCenter = Vectors.dense(9.0, 9.0, 9.0)
 
-    assert(model.clusterCenters.length === 2)
-    assert(model.clusterCenters(0) ~== firstCenter absTol 1E-5)
-    assert(model.clusterCenters(1) ~== secondCenter absTol 1E-5)
+    assert(finalCenters.length === 2)
+    assert(finalCenters(0) ~== firstCenter absTol 1E-5)
+    assert(finalCenters(1) ~== secondCenter absTol 1E-5)
   }
 
 }

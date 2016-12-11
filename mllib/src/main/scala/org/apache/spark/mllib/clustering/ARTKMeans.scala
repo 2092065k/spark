@@ -17,21 +17,44 @@
 
 package org.apache.spark.mllib.clustering
 
+import scala.collection.mutable.ArrayBuffer
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{DenseVector, Vector, Vectors}
 import org.apache.spark.mllib.linalg.BLAS.{axpy, scal}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.streaming.dstream.DStream
 
-class ARTKMeans private(private var a: Double)  extends Serializable with Logging{
+class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
-  var clusterCenters: Array[VectorWithNorm] = Array()
-  var clusterWights: Array[Double] = Array()
+  protected var clusterCenters: Array[VectorWithNorm] = Array()
+  protected var clusterWeights: Array[Double] = Array()
+  protected var globalMax: Vector = null
+  protected var globalMin: Vector = null
+  protected var model = new KMeansModel(clusterCenters.map(centerWithNorm => centerWithNorm.vector))
 
   def getA: Double = a
 
   def setA(a: Double) {
     require(a > 0.0 && a <= 1.0, s"Vigilance percentage needs to be between 0 and 1 but got ${a}")
     this.a = a
+  }
+
+  def latestModel(): KMeansModel = {
+    model
+  }
+
+  def setInitialCenters(centers: Array[Vector], weights: Array[Double]): this.type = {
+    require(centers.size == weights.size,
+      "Number of initial centers must be equal to number of weights")
+    require(weights.forall(_ >= 0),
+      s"Weight for each inital center must be nonnegative but got [${weights.mkString(" ")}]")
+    clusterCenters = centers.zip(centers.map(Vectors.norm(_, 2.0))).map{ case (v, norm) =>
+      new VectorWithNorm(v, norm)
+    }
+    clusterWeights = weights
+    model = new KMeansModel(centers)
+    this
   }
 
   private def getLargerParts(x: Vector, y: Vector): Vector = {
@@ -65,10 +88,93 @@ class ARTKMeans private(private var a: Double)  extends Serializable with Loggin
     new DenseVector(z)
   }
 
-  private def run(data: RDD[Vector]): KMeansModel = {
+  private def distanceBetweenVectors(x: Vector, y: Vector): Double = {
+    val diff = (x.toArray, y.toArray).zipped.map(_ - _)
+    val distArray = diff.map(elem => Math.pow(elem, 2))
+    distArray.sum
+  }
 
-    val max = data.reduce{ case(x, y) => getLargerParts(x, y) }
-    val min = data.reduce{ case(x, y) => getSmallestParts(x, y) }
+  private def getClosestCenterPairInfo(point: VectorWithNorm): (Int, Double) = {
+    val consideredCenters: ArrayBuffer[VectorWithNorm] = ArrayBuffer(clusterCenters : _*)
+    consideredCenters.remove(consideredCenters.indexOf(point))
+
+    val (closestCenterIndex, distance) = KMeans.findClosest(consideredCenters, point)
+    val closestCenter = consideredCenters(closestCenterIndex)
+
+    (clusterCenters.indexOf(closestCenter), distance)
+  }
+  
+  private def combineCenters(max: Vector, min: Vector, a: Double) {
+
+    val newClusterCenters: ArrayBuffer[VectorWithNorm] = ArrayBuffer(clusterCenters : _*)
+    val newClusterWeights: ArrayBuffer[Double] = ArrayBuffer(clusterWeights : _*)
+    var closestCenterPairs: ArrayBuffer[((Int, Double), VectorWithNorm)] = ArrayBuffer()
+    val dims = clusterCenters(0).vector.size
+    val vigilance = a * dims
+    var combinationNeeded = true
+
+    while(combinationNeeded && newClusterCenters.length > 1) {
+      closestCenterPairs = newClusterCenters.map(center =>
+        (getClosestCenterPairInfo(center), center)
+      )
+
+      val closestPair = closestCenterPairs.reduce{ (a, b) =>
+        if (a._1._2 < b._1._2) a
+        else b
+      }
+
+      val element1 = closestPair._2
+      val element2 = newClusterCenters(closestPair._1._1)
+      val element1Index = newClusterCenters.indexOf(element1)
+      val element2Index = newClusterCenters.indexOf(element2)
+      val center1 = element1.vector
+      val center2 = element2.vector
+
+      val normalizedCenter1 = normalizeVector(center1, max, min)
+      val normalizedCenter2 = normalizeVector(center2, max, min)
+      val dist = distanceBetweenVectors(normalizedCenter1, normalizedCenter2)
+
+      if (dist < vigilance) {
+
+        // compute new combined center and insert it along with its new weight
+        val newCenter = new DenseVector(Array.fill(dims)(0.0))
+        axpy(1.0, center1, newCenter)
+        axpy(1.0, center2, newCenter)
+        scal(0.5, newCenter)
+        newClusterCenters += new VectorWithNorm(newCenter)
+        newClusterWeights += newClusterWeights(element1Index) + newClusterWeights(element2Index)
+
+        // remove info for the two combined centers
+        newClusterCenters.remove(element1Index)
+        newClusterCenters.remove(element2Index)
+        newClusterWeights.remove(element1Index)
+        newClusterWeights.remove(element2Index)
+      }
+      else {
+
+        // the two closest centers are further away than the vigilance
+        combinationNeeded = false
+      }
+    }
+
+    clusterCenters = newClusterCenters.toArray
+    clusterWeights = newClusterWeights.toArray
+
+  }
+
+  private def update(data: RDD[Vector]): KMeansModel = {
+
+    // recompute new min and max
+    val localMax = data.reduce{ case(x, y) => getLargerParts(x, y) }
+    val localMin = data.reduce{ case(x, y) => getSmallestParts(x, y) }
+
+    if(globalMax == null || localMax == null) {
+      globalMax = localMax
+      globalMin = localMin
+    }
+
+    globalMax = getLargerParts(globalMax, localMax)
+    globalMin = getSmallestParts(globalMin, localMin)
 
     val norms = data.map(Vectors.norm(_, 2.0))
     norms.persist()
@@ -80,10 +186,13 @@ class ARTKMeans private(private var a: Double)  extends Serializable with Loggin
     // ensure one center exists
     if(clusterCenters.length == 0) {
       clusterCenters = clusterCenters :+ zippedData.take(1).head
-      clusterWights = clusterWights :+ 0.0
+      clusterWeights = clusterWeights :+ 0.0
     }
 
-    runAlgorithm(zippedData, max, min)
+    // the state space may have expanded when reading new data
+    combineCenters(globalMax, globalMin, a)
+
+    runAlgorithm(zippedData, globalMax, globalMin)
     norms.unpersist()
 
     new KMeansModel(clusterCenters.map(centerWithNorm => centerWithNorm.vector))
@@ -92,45 +201,91 @@ class ARTKMeans private(private var a: Double)  extends Serializable with Loggin
   private def runAlgorithm(data: RDD[VectorWithNorm], max: Vector, min: Vector) {
 
     val sc = data.sparkContext
+    val bcCenters = sc.broadcast(clusterCenters)
+    val bcWeights = sc.broadcast(clusterWeights)
+    val initialCenterCount = clusterCenters.length
     val dims = data.take(1).head.vector.size
     val vigilance = a * dims
 
-    data.collect().foreach {point =>
+    val closestCenterIndices = data.map(point => KMeans.findClosest(clusterCenters, point)._1)
+    val closestPairs = closestCenterIndices.zip(data)
 
-      val (bestCenter, cost) = KMeans.findClosest(clusterCenters, point)
+    val final_centers_and_weights = closestPairs.groupByKey().mapPartitions {pointsInfo =>
 
-      val closestCenter = clusterCenters(bestCenter).vector
-      val normalizedPoint = normalizeVector(point.vector, max, min)
-      val normalizedCenter = normalizeVector(closestCenter, max, min)
+      var localCenters = bcCenters.value
+      var localWeights = bcWeights.value
 
-      val diff = (normalizedCenter.toArray, normalizedPoint.toArray).zipped.map(_ - _)
-      val distArray = diff.map(elem => Math.pow(elem, 2))
-      val dist = distArray.sum
+      var centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
+      var counts = Array.fill(localWeights.length)(0.0)
 
-      if(dist < vigilance) {
+      pointsInfo.foreach{ pointsPerCenterInfo =>
+        var centerIndex = pointsPerCenterInfo._1
+        val points = pointsPerCenterInfo._2
+        counts(centerIndex) = localWeights(centerIndex)
 
-        // adjust existing center
-        clusterWights(bestCenter) += 1
-        val contrib = new DenseVector(Array.fill(dims)(0.0))
-        axpy(1.0, point.vector, contrib)
-        axpy(-1.0, closestCenter, contrib)
-        scal(1.0/clusterWights(bestCenter), contrib)
-        axpy(1.0, contrib, closestCenter)
+        points.foreach { point =>
 
+          /*
+          need to recompute the center for each point to know if it should contribute to
+          the initially closest center or to the newly added ones and get its correct index
+          */
+          centerIndex = KMeans.findClosest(localCenters, point)._1
+          val center = localCenters(centerIndex).vector
+
+          val normalizedPoint = normalizeVector(point.vector, max, min)
+          val normalizedCenter = normalizeVector(center, max, min)
+
+          val dist = distanceBetweenVectors(normalizedCenter, normalizedPoint)
+
+          if(dist < vigilance) {
+
+            counts(centerIndex) += 1
+            val contrib = new DenseVector(Array.fill(dims)(0.0))
+            axpy(1.0, point.vector, contrib)
+            axpy(-1.0, center, contrib)
+            scal(1.0/counts(centerIndex), contrib)
+            axpy(1.0, contrib, center)
+            centersValue(centerIndex) = center
+          }
+          else {
+            localCenters = localCenters :+ point
+            localWeights = localWeights :+ 1.0
+            centersValue = centersValue :+ point.vector
+            counts = counts :+ 1.0
+          }
+        }
+      }
+      counts.indices.filter(counts(_) > 0).map(j => (j, (centersValue(j), counts(j)))).iterator
+    }.collect()
+
+    final_centers_and_weights.foreach { centerInfo =>
+      val centerIndex = centerInfo._1
+      val newCenterValue = centerInfo._2._1
+      val newCenterWeight = centerInfo._2._2
+
+      if(centerIndex < initialCenterCount) {
+
+        // alter the value of an existing center
+        clusterWeights(centerIndex) = newCenterWeight
+        clusterCenters(centerIndex) = new VectorWithNorm(newCenterValue)
       }
       else {
-        clusterCenters = clusterCenters :+ point
-        clusterWights = clusterWights :+ 1.0
+
+        // include the new center
+        clusterWeights = clusterWeights :+ newCenterWeight
+        clusterCenters = clusterCenters :+ new VectorWithNorm(newCenterValue)
       }
+
+    }
+
+    // attempt to recombine centers again to remove extras on the borders of partitions
+    combineCenters(globalMax, globalMin, a/2.0)
+  }
+
+  def trainOn(data: DStream[Vector]) {
+    data.foreachRDD { (rdd, time) =>
+      model = update(rdd)
     }
   }
 
-}
-
-object ARTKMeans {
-  def train(
-     data: RDD[Vector],
-     a: Double): KMeansModel = {
-    new ARTKMeans(a).run(data)
-  }
 }
