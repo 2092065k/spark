@@ -64,10 +64,6 @@ class StreamingOnlineKMeansModel(
 
       }
       counts.indices.filter(counts(_) > 0).map(j => (j, (centersValue(j), counts(j)))).iterator
-    }.reduceByKey { case ((centValue1, count1), (centValue2, count2)) =>
-      val count = count1 + count2
-      axpy(1.0, centValue2, centValue1)
-      (centValue1, count)
     }.collect()
 
     final_centers_and_weights.foreach{ centerInfo =>
