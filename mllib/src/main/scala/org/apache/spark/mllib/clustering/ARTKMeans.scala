@@ -75,7 +75,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     new DenseVector(z)
   }
 
-  private def normalizeVector(x: Vector, max: Vector, min: Vector): Vector = {
+  private def normalizeVector(x: Vector, max: Vector, min: Vector): VectorWithNorm = {
 
     val size = x.size
     var z = Array[Double]()
@@ -83,13 +83,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
       val elem = (x(a) - min(a))/(max(a) - min(a))
       z = z :+ elem
     }
-    new DenseVector(z)
-  }
-
-  private def distanceBetweenVectors(x: Vector, y: Vector): Double = {
-    val diff = (x.toArray, y.toArray).zipped.map(_ - _)
-    val distArray = diff.map(elem => Math.pow(elem, 2))
-    distArray.sum
+    new VectorWithNorm(z)
   }
 
   /**
@@ -113,7 +107,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
       val closestCenter = newClusterCenters(bestCenter).vector
       val normalizedPoint = normalizeVector(point.vector, max, min)
       val normalizedCenter = normalizeVector(closestCenter, max, min)
-      val dist = distanceBetweenVectors(normalizedPoint, normalizedCenter)
+      val dist = KMeans.fastSquaredDistance(normalizedPoint, normalizedCenter)
 
       if(dist < vigilance) {
 
@@ -212,7 +206,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
           val normalizedPoint = normalizeVector(point.vector, max, min)
           val normalizedCenter = normalizeVector(center, max, min)
 
-          val dist = distanceBetweenVectors(normalizedCenter, normalizedPoint)
+          val dist = KMeans.fastSquaredDistance(normalizedCenter, normalizedPoint)
 
           if(dist < vigilance) {
 
