@@ -37,8 +37,8 @@ class StreamingOnlineKMeansModel(
     val bcWeights = sc.broadcast(clusterWeights)
 
     val final_centers_and_weights = closest.groupByKey().mapPartitions{ pointsInfo =>
-      val localCenters = bcCenters.value
-      val localWeights = bcWeights.value
+      val localCenters = KMeans.deepCopyVectorArray(bcCenters.value)
+      val localWeights = bcWeights.value.clone()
 
       val centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
       val counts = Array.fill(localWeights.length)(0.0)

@@ -578,6 +578,35 @@ object KMeans {
     MLUtils.fastSquaredDistance(v1.vector, v1.norm, v2.vector, v2.norm)
   }
 
+  /**
+   * Creates a deep copy of an input VectorWithNorm Array
+   */
+  private[mllib] def deepCopyVectorWithNormArray(
+      source: Array[VectorWithNorm]): Array[VectorWithNorm] = {
+
+    val dims = source(0).vector.size
+    val localVectors = Array.fill(source.length)(Vectors.zeros(dims))
+
+    source.zipWithIndex.foreach{ elem => axpy(1.0, elem._1.vector, localVectors(elem._2))}
+
+    val norms = localVectors.map(Vectors.norm(_, 2.0))
+    val localCentersWithNorms = localVectors.zip(norms).map { case (v, norm) =>
+      new VectorWithNorm(v, norm)
+    }
+
+    localCentersWithNorms
+  }
+
+  /**
+   * Creates a deep copy of an input Vector Array
+   */
+  private[mllib] def deepCopyVectorArray(source: Array[Vector]): Array[Vector] = {
+    val dims = source(0).size
+    val localVectors = Array.fill(source.length)(Vectors.zeros(dims))
+    source.zipWithIndex.foreach{ elem => axpy(1.0, elem._1, localVectors(elem._2))}
+    localVectors
+  }
+
   private[spark] def validateInitMode(initMode: String): Boolean = {
     initMode match {
       case KMeans.RANDOM => true

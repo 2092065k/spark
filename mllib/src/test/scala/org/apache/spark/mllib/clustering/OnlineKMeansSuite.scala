@@ -36,8 +36,8 @@ class OnlineKMeansSuite extends SparkFunSuite with MLlibTestSparkContext{
     val seed = 1
     val model = OnlineKMeans.train(data, numClusters, seed)
 
-    val firstCenter = Vectors.dense(1.0, 1.0, 1.0)
-    val secondCenter = Vectors.dense(9.0, 9.0, 9.0)
+    val firstCenter = Vectors.dense(9.0, 9.0, 9.0)
+    val secondCenter = Vectors.dense(1.0, 1.0, 1.0)
 
     assert(model.clusterCenters.length === 2)
     assert(model.clusterCenters(0) ~== firstCenter absTol 1E-5)

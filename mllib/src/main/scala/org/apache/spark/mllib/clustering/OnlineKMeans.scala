@@ -27,19 +27,6 @@ class OnlineKMeans private (
     private var k: Int,
     private var seed: Long) extends Serializable with Logging {
 
-  def getK: Int = k
-
-  def setK(k: Int) {
-    require(k > 0, s"Number of clusters must be positive but got ${k}")
-    this.k = k
-  }
-
-  def getSeed: Long = seed
-
-  def setSeed(seed: Long) {
-    this.seed = seed
-  }
-
   private def run(data: RDD[Vector]): KMeansModel = {
 
     // Compute squared norms and cache them.
@@ -65,14 +52,16 @@ class OnlineKMeans private (
     val bcCenters = sc.broadcast(centers)
 
     val finalCenters = data.mapPartitions { points =>
-      val thisCenters = bcCenters.value
 
-      val centersValue = Array.fill(thisCenters.length)(Vectors.zeros(dims))
-      val counts = Array.fill(thisCenters.length)(0.0)
+      val localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
+
+      val centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
+      val counts = Array.fill(localCenters.length)(0.0)
 
       points.foreach{ point =>
-        val (bestCenter, cost) = KMeans.findClosest(thisCenters, point)
-        val center = centersValue(bestCenter)
+
+        val (bestCenter, cost) = KMeans.findClosest(localCenters, point)
+        val center = localCenters(bestCenter).vector
         counts(bestCenter) += 1
 
         // add the contribution of one point
@@ -81,6 +70,7 @@ class OnlineKMeans private (
         axpy(-1.0, center, contrib)
         scal(1.0/counts(bestCenter), contrib)
         axpy(1.0, contrib, center)
+        centersValue(bestCenter) = center
       }
 
       counts.indices.filter(counts(_) > 0).map(j => (j, (centersValue(j), counts(j)))).iterator
@@ -90,9 +80,17 @@ class OnlineKMeans private (
       scal(count2/count, centValue2)
       axpy(1.0, centValue2, centValue1)
       (centValue1, count)
-    }.collectAsMap()
+    }.collect()
 
-    new KMeansModel(finalCenters.map{case(k, v) => v._1}.toArray)
+    finalCenters.foreach{ centerInfo =>
+
+      val centerIndex = centerInfo._1
+      val newCenterValue = centerInfo._2._1
+
+      centers(centerIndex) = new VectorWithNorm(newCenterValue)
+    }
+
+    new KMeansModel(centers.map(elem => elem.vector))
 
   }
 

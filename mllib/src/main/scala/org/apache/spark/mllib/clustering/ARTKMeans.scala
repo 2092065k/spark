@@ -183,8 +183,8 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
     val final_centers_and_weights = closestPairs.groupByKey().mapPartitions {pointsInfo =>
 
-      var localCenters = bcCenters.value
-      var localWeights = bcWeights.value
+      var localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
+      var localWeights = bcWeights.value.clone()
 
       var centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
       var counts = Array.fill(localWeights.length)(0.0)
