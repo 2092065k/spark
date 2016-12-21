@@ -46,7 +46,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     require(centers.size == weights.size,
       "Number of initial centers must be equal to number of weights")
     require(weights.forall(_ >= 0),
-      s"Weight for each inital center must be nonnegative but got [${weights.mkString(" ")}]")
+      s"Weight for each initial center must be non-negative but got [${weights.mkString(" ")}]")
     clusterCenters = centers.zip(centers.map(Vectors.norm(_, 2.0))).map{ case (v, norm) =>
       new VectorWithNorm(v, norm)
     }
