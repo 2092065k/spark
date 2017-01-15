@@ -55,25 +55,27 @@ class OnlineKMeans private (
 
       val localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
 
-      val centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
-      val counts = Array.fill(localCenters.length)(0.0)
+      val centerValues = Array.fill(localCenters.length)(Vectors.zeros(dims))
+      val weights = Array.fill(localCenters.length)(0.0)
 
       points.foreach{ point =>
 
-        val (bestCenter, cost) = KMeans.findClosest(localCenters, point)
-        val center = localCenters(bestCenter).vector
-        counts(bestCenter) += 1
+        val (centerIndex, cost) = KMeans.findClosest(localCenters, point)
+        val center = localCenters(centerIndex).vector
+        weights(centerIndex) += 1
 
         // add the contribution of one point
         val contrib = new DenseVector(Array.fill(dims)(0.0))
         axpy(1.0, point.vector, contrib)
         axpy(-1.0, center, contrib)
-        scal(1.0/counts(bestCenter), contrib)
+        scal(1.0/weights(centerIndex), contrib)
         axpy(1.0, contrib, center)
-        centersValue(bestCenter) = center
+        val centerResult = new VectorWithNorm(center)
+        localCenters(centerIndex) = centerResult
+        centerValues(centerIndex) = centerResult.vector
       }
 
-      counts.indices.filter(counts(_) > 0).map(j => (j, (centersValue(j), counts(j)))).iterator
+      weights.indices.filter(weights(_) > 0).map(j => (j, (centerValues(j), weights(j)))).iterator
     }.reduceByKey { case ((centValue1, count1), (centValue2, count2)) =>
       val count = count1 + count2
       scal(count1/count, centValue1)

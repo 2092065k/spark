@@ -41,29 +41,29 @@ class StreamingOnlineKMeansModel(
       val localWeights = bcWeights.value.clone()
 
       val centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
-      val counts = Array.fill(localWeights.length)(0.0)
+      val weights = Array.fill(localWeights.length)(0.0)
 
       pointsInfo.foreach{ pointsPerCenterInfo =>
         val centerIndex = pointsPerCenterInfo._1
         val points = pointsPerCenterInfo._2
-        counts(centerIndex) = localWeights(centerIndex)
+        weights(centerIndex) = localWeights(centerIndex)
 
         points.foreach{ point =>
 
           val center = localCenters(centerIndex)
-          counts(centerIndex) += 1
+          weights(centerIndex) += 1
 
           // add the contribution of one point
           val contrib = new DenseVector(Array.fill(dims)(0.0))
           axpy(1.0, point, contrib)
           axpy(-1.0, center, contrib)
-          scal(1.0/counts(centerIndex), contrib)
+          scal(1.0/weights(centerIndex), contrib)
           axpy(1.0, contrib, center)
           centersValue(centerIndex) = center
         }
 
       }
-      counts.indices.filter(counts(_) > 0).map(j => (j, (centersValue(j), counts(j)))).iterator
+      weights.indices.filter(weights(_) > 0).map(j => (j, (centersValue(j), weights(j)))).iterator
     }.collect()
 
     final_centers_and_weights.foreach{ centerInfo =>

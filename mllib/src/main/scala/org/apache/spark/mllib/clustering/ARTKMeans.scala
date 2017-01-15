@@ -29,7 +29,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
   protected var clusterWeights: Array[Double] = Array()
   protected var globalMax: Vector = null
   protected var globalMin: Vector = null
-  protected var model = new KMeansModel(clusterCenters.map(centerWithNorm => centerWithNorm.vector))
+  protected var model = new KMeansModel(clusterCenters.map(_.vector))
 
   def getA: Double = a
 
@@ -47,9 +47,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
       "Number of initial centers must be equal to number of weights")
     require(weights.forall(_ >= 0),
       s"Weight for each initial center must be non-negative but got [${weights.mkString(" ")}]")
-    clusterCenters = centers.zip(centers.map(Vectors.norm(_, 2.0))).map{ case (v, norm) =>
-      new VectorWithNorm(v, norm)
-    }
+    clusterCenters = centers.map(new VectorWithNorm(_))
     clusterWeights = weights
     model = new KMeansModel(centers)
     this
@@ -103,23 +101,24 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
     clusterCenters.zipWithIndex.foreach{ case(point, index) =>
 
-      val (bestCenter, distance) = KMeans.findClosest(newClusterCenters, point)
-      val closestCenter = newClusterCenters(bestCenter).vector
+      val (centerIndex, distance) = KMeans.findClosest(newClusterCenters, point)
+      val closestCenter = newClusterCenters(centerIndex).vector
       val normalizedPoint = normalizeVector(point.vector, max, min)
       val normalizedCenter = normalizeVector(closestCenter, max, min)
       val dist = KMeans.fastSquaredDistance(normalizedPoint, normalizedCenter)
 
       if(dist < vigilance) {
 
-        val newWeight = newClusterWeights(bestCenter) + clusterWeights(index)
+        val newWeight = newClusterWeights(centerIndex) + clusterWeights(index)
 
         // check is necessary to overcome initial center placement
         if(newWeight != 0) {
           val contrib = new DenseVector(Array.fill(dims)(0.0))
           axpy(clusterWeights(index) / newWeight, point.vector, contrib)
-          scal(newClusterWeights(bestCenter) / newWeight, closestCenter)
+          scal(newClusterWeights(centerIndex) / newWeight, closestCenter)
           axpy(1.0, contrib, closestCenter)
-          newClusterWeights(bestCenter) = newWeight
+          newClusterCenters(centerIndex) = new VectorWithNorm(closestCenter)
+          newClusterWeights(centerIndex) = newWeight
         }
       }
       else {
@@ -187,12 +186,12 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
       var localWeights = bcWeights.value.clone()
 
       var centersValue = Array.fill(localCenters.length)(Vectors.zeros(dims))
-      var counts = Array.fill(localWeights.length)(0.0)
+      var weights = Array.fill(localWeights.length)(0.0)
 
       pointsInfo.foreach{ pointsPerCenterInfo =>
         var centerIndex = pointsPerCenterInfo._1
         val points = pointsPerCenterInfo._2
-        counts(centerIndex) = localWeights(centerIndex)
+        weights(centerIndex) = localWeights(centerIndex)
 
         points.foreach { point =>
 
@@ -210,23 +209,25 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
           if(dist < vigilance) {
 
-            counts(centerIndex) += 1
+            weights(centerIndex) += 1
             val contrib = new DenseVector(Array.fill(dims)(0.0))
             axpy(1.0, point.vector, contrib)
             axpy(-1.0, center, contrib)
-            scal(1.0/counts(centerIndex), contrib)
+            scal(1.0/weights(centerIndex), contrib)
             axpy(1.0, contrib, center)
-            centersValue(centerIndex) = center
+            val centerResult = new VectorWithNorm(center)
+            localCenters(centerIndex) = centerResult
+            centersValue(centerIndex) = centerResult.vector
           }
           else {
             localCenters = localCenters :+ point
             localWeights = localWeights :+ 1.0
             centersValue = centersValue :+ point.vector
-            counts = counts :+ 1.0
+            weights = weights :+ 1.0
           }
         }
       }
-      counts.indices.filter(counts(_) > 0).map(j => (j, (centersValue(j), counts(j)))).iterator
+      weights.indices.filter(weights(_) > 0).map(j => (j, (centersValue(j), weights(j)))).iterator
     }.collect()
 
     final_centers_and_weights.foreach { centerInfo =>

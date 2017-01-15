@@ -78,9 +78,7 @@ class SOMKMeans (
   def setInitialCenters(centers: Array[Vector]): this.type = {
     require(centers.size == NNDimensions * NNDimensions,
       s"Number of initial centers must be ${NNDimensions * NNDimensions} but got ${centers.size}")
-    clusterCenters = centers.zip(centers.map(Vectors.norm(_, 2.0))).map{ case (v, norm) =>
-      new VectorWithNorm(v, norm)
-    }
+    clusterCenters = centers.map(new VectorWithNorm(_))
     model = new KMeansModel(centers)
     this
   }
@@ -91,9 +89,7 @@ class SOMKMeans (
 
     val numCenters = NNDimensions * NNDimensions
     val randomCenters = rdd.takeSample(true, numCenters, new XORShiftRandom(this.seed).nextInt())
-    clusterCenters = randomCenters.zip(randomCenters.map(
-      Vectors.norm(_, 2.0))).map{ case (v, norm) => new VectorWithNorm(v, norm)
-    }
+    clusterCenters = randomCenters.map(new VectorWithNorm(_))
     model = new KMeansModel(randomCenters)
   }
 
@@ -145,6 +141,7 @@ class SOMKMeans (
         axpy(-1.0, center.vector, contrib)
         scal(learningRate, contrib)
         axpy(1.0, contrib, center.vector)
+        localCenters(centerIndex) = new VectorWithNorm(center.vector)
 
         // obtain the indices of all neighbour centroids
         val winnerRow = centerIndex / NNDimensions
@@ -171,6 +168,7 @@ class SOMKMeans (
           axpy(-1.0, neighbourCenter.vector, contrib)
           scal(learningRate * ni, contrib)
           axpy(1.0, contrib, neighbourCenter.vector)
+          localCenters(index) = new VectorWithNorm(neighbourCenter.vector)
         }
       }
       addedWeights.indices.filter(addedWeights(_) > 0).map(j =>
