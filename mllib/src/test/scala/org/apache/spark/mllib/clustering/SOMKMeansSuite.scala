@@ -36,7 +36,7 @@ class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
     val NNDimensions = 5
     val nSize = 1
     val sigma = 1.0
-    val learningRate = 0.8
+    val learningRate = 0.2
     val seed = 1
 
     val model = new SOMKMeans(NNDimensions, nSize, sigma, learningRate, seed)

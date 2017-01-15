@@ -32,7 +32,6 @@ class SOMKMeans (
     var seed: Long)  extends Logging with Serializable {
 
   var clusterCenters: Array[VectorWithNorm] = null
-  var clusterWeights: Array[Double] = null
   var model: KMeansModel = null
 
   def getNNDimensions: Int = NNDimensions
@@ -76,17 +75,12 @@ class SOMKMeans (
     this.seed = seed
   }
 
-  def setInitialCenters(centers: Array[Vector], weights: Array[Double]): this.type = {
-    require(centers.size == weights.size,
-      "Number of initial centers must be equal to number of weights")
+  def setInitialCenters(centers: Array[Vector]): this.type = {
     require(centers.size == NNDimensions * NNDimensions,
       s"Number of initial centers must be ${NNDimensions * NNDimensions} but got ${centers.size}")
-    require(weights.forall(_ >= 0),
-      s"Weight for each initial center must be non-negative but got [${weights.mkString(" ")}]")
     clusterCenters = centers.zip(centers.map(Vectors.norm(_, 2.0))).map{ case (v, norm) =>
       new VectorWithNorm(v, norm)
     }
-    clusterWeights = weights
     model = new KMeansModel(centers)
     this
   }
@@ -100,7 +94,6 @@ class SOMKMeans (
     clusterCenters = randomCenters.zip(randomCenters.map(
       Vectors.norm(_, 2.0))).map{ case (v, norm) => new VectorWithNorm(v, norm)
     }
-    clusterWeights = Array.fill(numCenters)(0.0)
     model = new KMeansModel(randomCenters)
   }
 
@@ -133,27 +126,24 @@ class SOMKMeans (
 
     val sc = data.sparkContext
     val bcCenters = sc.broadcast(clusterCenters)
-    val bcWeights = sc.broadcast(clusterWeights)
     val dims = clusterCenters(0).vector.size
 
     val final_centers_and_weights = data.mapPartitions { points =>
 
       val localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
-      val localWeights = bcWeights.value.clone()
-      val addedWeights = Array.fill(localWeights.length)(0.0)
+      val addedWeights = Array.fill(clusterCenters.length)(0.0)
 
       points.foreach { point =>
 
         val (centerIndex, cost) = KMeans.findClosest(localCenters, point)
         val center = localCenters(centerIndex)
-        localWeights(centerIndex) += 1
         addedWeights(centerIndex) += 1
 
         // adjust the closest centroid
         val contrib = new DenseVector(Array.fill(dims)(0.0))
         axpy(1.0, point.vector, contrib)
         axpy(-1.0, center.vector, contrib)
-        scal(1.0/localWeights(centerIndex), contrib)
+        scal(learningRate, contrib)
         axpy(1.0, contrib, center.vector)
 
         // obtain the indices of all neighbour centroids
@@ -173,34 +163,29 @@ class SOMKMeans (
         neighbourhoodCentroidIndices.foreach{ index =>
 
           val neighbourCenter = localCenters(index)
-          localWeights(index) += 1
-          addedWeights(index) += 1
+          val ni = neighbourhoodImpact(center, neighbourCenter)
+          addedWeights(index) += ni
 
           val contrib = new DenseVector(Array.fill(dims)(0.0))
-          val ni = neighbourhoodImpact(center, neighbourCenter)
-          axpy(-1.0, neighbourCenter.vector, contrib)
           axpy(1.0, point.vector, contrib)
+          axpy(-1.0, neighbourCenter.vector, contrib)
           scal(learningRate * ni, contrib)
           axpy(1.0, contrib, neighbourCenter.vector)
         }
       }
       addedWeights.indices.filter(addedWeights(_) > 0).map(j =>
-        (j, (localCenters(j), localWeights(j), addedWeights(j)))).iterator
-    }.reduceByKey{ case ((center1, count1, addedCount1), (center2, count2, addedCount2)) =>
+        (j, (localCenters(j), addedWeights(j)))).iterator
+    }.reduceByKey{ case ((center1, addedCount1), (center2, addedCount2)) =>
       val addedCount = addedCount1 + addedCount2
       scal(addedCount1/addedCount, center1.vector)
       scal(addedCount2/addedCount, center2.vector)
       axpy(1.0, center2.vector, center1.vector)
-      val newCount = (count1 - addedCount1) + addedCount
-      (center1, newCount, addedCount)
+      (center1, addedCount)
     }.collect()
 
     final_centers_and_weights.foreach{ centerInfo =>
       val centerIndex = centerInfo._1
       val newCenterValue = centerInfo._2._1
-      val newCenterWeight = centerInfo._2._2
-
-      clusterWeights(centerIndex) = newCenterWeight
       clusterCenters(centerIndex) = newCenterValue
     }
 
