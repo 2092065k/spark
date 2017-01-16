@@ -60,7 +60,6 @@ class Silhouette(
 
     val closestCenterData = processedData.map( point => KMeans.findClosest(processedCenters, point))
     val pointsWithCenterInfo = processedData.zip(closestCenterData)
-    pointsWithCenterInfo.checkpoint()
 
     val collectedPointInfo = pointsWithCenterInfo.collect()
 
