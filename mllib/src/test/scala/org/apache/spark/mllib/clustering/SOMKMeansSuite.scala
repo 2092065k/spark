@@ -17,14 +17,14 @@
 
 package org.apache.spark.mllib.clustering
 
-import org.apache.spark.SparkFunSuite
+import org.apache.spark.{SparkContext, SparkFunSuite}
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.streaming.{StreamingContext, TestSuiteBase}
 import org.apache.spark.streaming.dstream.DStream
 
 class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
 
-  test("Base case ART K-means clustering") {
+  test("Base case SOM K-means clustering") {
 
     val data = Seq(
       Vectors.dense(0.0, 0.0, 0.0),
@@ -49,7 +49,62 @@ class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
     runStreams(scc, 1, 1)
     val finalCenters = model.latestModel().clusterCenters
 
+    print(s"SOM Result :${finalCenters.mkString("[", " ", "]")}\n")
     assert(finalCenters.length === 25)
+
+  }
+
+  test("Test the sequential version of SOM K-Means") {
+
+    val data = Seq(
+      Vectors.dense(0.0, 0.0, 0.0),
+      Vectors.dense(2.0, 2.0, 2.0),
+      Vectors.dense(8.0, 8.0, 8.0),
+      Vectors.dense(10.0, 10.0, 10.0)
+    )
+
+    val NNDimensions = 5
+    val nSize = 1
+    val sigma = 1.0
+    val learningRate = 0.2
+    val seed = 1
+
+    val sc = new SparkContext(conf)
+    val parallelData = sc.parallelize(data)
+    val seqComp = new SOMKMeans(NNDimensions, nSize, sigma, learningRate, seed)
+    seqComp.computeSequentially(parallelData)
+    val seqModelClusters = seqComp.latestModel().clusterCenters
+    sc.stop()
+
+    print(s"Sequential SOM Result: ${seqModelClusters.mkString("[", " ", "]")}\n")
+    assert(seqModelClusters.length === 25)
+
+  }
+
+  test("Test SOM K-Means with unbiased sampling") {
+
+    val data = Seq(
+      Vectors.dense(0.0, 0.0, 0.0),
+      Vectors.dense(2.0, 2.0, 2.0),
+      Vectors.dense(8.0, 8.0, 8.0),
+      Vectors.dense(10.0, 10.0, 10.0)
+    )
+
+    val NNDimensions = 5
+    val nSize = 1
+    val sigma = 1.0
+    val learningRate = 0.2
+    val seed = 1
+
+    val sc = new SparkContext(conf)
+    val parallelData = sc.parallelize(data)
+    val unbiasedComp = new SOMKMeans(NNDimensions, nSize, sigma, learningRate, seed)
+    unbiasedComp.computeUnbiasedSampling(parallelData)
+    val unbiasedCompClusters = unbiasedComp.latestModel().clusterCenters
+    sc.stop()
+
+    print(s"Unbiased SOM Result: ${unbiasedCompClusters.mkString("[", " ", "]")}\n")
+    assert(unbiasedCompClusters.length === 25)
 
   }
 

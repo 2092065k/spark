@@ -92,7 +92,7 @@ class OnlineKMeans private (
       centers(centerIndex) = new VectorWithNorm(newCenterValue)
     }
 
-    new KMeansModel(centers.map(elem => elem.vector))
+    new KMeansModel(centers.map(_.vector))
 
   }
 

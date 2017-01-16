@@ -17,6 +17,8 @@
 
 package org.apache.spark.mllib.clustering
 
+import scala.util.Random
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{DenseVector, Vector, Vectors}
 import org.apache.spark.mllib.linalg.BLAS._
@@ -187,7 +189,7 @@ class SOMKMeans (
       clusterCenters(centerIndex) = newCenterValue
     }
 
-    new KMeansModel(clusterCenters.map(elem => elem.vector))
+    new KMeansModel(clusterCenters.map(_.vector))
 
   }
 
@@ -200,6 +202,87 @@ class SOMKMeans (
       }
       model = update(rdd)
     }
+  }
+
+  /**
+    * A sequential version of the algorithm for comparison purposes
+    */
+  def computeSequentially(data: RDD[Vector]) {
+    initialiseRandomModel(data)
+    val dims = clusterCenters(0).vector.size
+
+
+    data.collect().foreach{ rawPoint =>
+
+      val point = new VectorWithNorm(rawPoint)
+      val (centerIndex, cost) = KMeans.findClosest(clusterCenters, point)
+      val center = clusterCenters(centerIndex)
+
+      // adjust the closest centroid
+      val contrib = new DenseVector(Array.fill(dims)(0.0))
+      axpy(1.0, point.vector, contrib)
+      axpy(-1.0, center.vector, contrib)
+      scal(learningRate, contrib)
+      axpy(1.0, contrib, center.vector)
+      clusterCenters(centerIndex) = new VectorWithNorm(center.vector)
+
+      // obtain the indices of all neighbour centroids
+      val winnerRow = centerIndex / NNDimensions
+      val winnerCol = centerIndex % NNDimensions
+      val neighbourhoodCentroidIndices =
+        (-nSize to nSize).flatMap { rowNumber =>
+          (-nSize to nSize).map { colNumber =>
+            val row = nonNegativeMod(winnerRow + rowNumber, NNDimensions)
+            val col = nonNegativeMod(winnerCol + colNumber, NNDimensions)
+            val neighbourIndex = row * NNDimensions + col
+            neighbourIndex
+          }
+        }.filter(index => index != centerIndex)
+
+      // adjust the centroids in the neighbourhood
+      neighbourhoodCentroidIndices.foreach{ index =>
+
+        val neighbourCenter = clusterCenters(index)
+        val ni = neighbourhoodImpact(center, neighbourCenter)
+
+        val contrib = new DenseVector(Array.fill(dims)(0.0))
+        axpy(1.0, point.vector, contrib)
+        axpy(-1.0, neighbourCenter.vector, contrib)
+        scal(learningRate * ni, contrib)
+        axpy(1.0, contrib, neighbourCenter.vector)
+        clusterCenters(index) = new VectorWithNorm(neighbourCenter.vector)
+      }
+    }
+
+    model = new KMeansModel(clusterCenters.map(_.vector))
+  }
+
+  /**
+    * Compute SOM sequentially from a single data partition with
+    * unbiased data sampling
+    */
+  def computeUnbiasedSampling(data: RDD[Vector]) {
+
+    val sc = data.context
+    val numPartitions = data.getNumPartitions
+    val randomGenerator = new Random()
+    randomGenerator.setSeed(10)
+
+    val dataWithPartitionIndex = data.map{ point =>
+      var partitionIndex = randomGenerator.nextInt(numPartitions)
+      for(i <- 0 until numPartitions) {
+        var nextPartitionIndex = randomGenerator.nextInt(numPartitions)
+        while (nextPartitionIndex == partitionIndex)
+          nextPartitionIndex = randomGenerator.nextInt(numPartitions)
+        partitionIndex = nextPartitionIndex
+      }
+      (partitionIndex, point)
+    }
+
+    val sampledData = dataWithPartitionIndex.filter{case (index, _) => index == 0}
+    val newData = sampledData.map{case (_, point) => point}
+
+    computeSequentially(newData)
   }
 
 }
