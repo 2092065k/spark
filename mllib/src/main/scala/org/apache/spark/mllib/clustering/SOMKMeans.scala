@@ -104,6 +104,20 @@ class SOMKMeans (
     math.exp(-sigma * squaredDistance)
   }
 
+  private def getNeighbourIndices(centerIndex: Int): Seq[Int] = {
+    val winnerRow = centerIndex / NNDimensions
+    val winnerCol = centerIndex % NNDimensions
+
+    (-nSize to nSize).flatMap { rowNumber =>
+      (-nSize to nSize).map { colNumber =>
+        val row = nonNegativeMod(winnerRow + rowNumber, NNDimensions)
+        val col = nonNegativeMod(winnerCol + colNumber, NNDimensions)
+        val neighbourIndex = row * NNDimensions + col
+        neighbourIndex
+      }
+    }.filter(index => index != centerIndex)
+  }
+
   private def update(data: RDD[Vector]): KMeansModel = {
 
     val norms = data.map(Vectors.norm(_, 2.0))
@@ -146,17 +160,7 @@ class SOMKMeans (
         localCenters(centerIndex) = new VectorWithNorm(center.vector)
 
         // obtain the indices of all neighbour centroids
-        val winnerRow = centerIndex / NNDimensions
-        val winnerCol = centerIndex % NNDimensions
-        val neighbourhoodCentroidIndices =
-          (-nSize to nSize).flatMap { rowNumber =>
-            (-nSize to nSize).map { colNumber =>
-              val row = nonNegativeMod(winnerRow + rowNumber, NNDimensions)
-              val col = nonNegativeMod(winnerCol + colNumber, NNDimensions)
-              val neighbourIndex = row * NNDimensions + col
-              neighbourIndex
-            }
-          }.filter(index => index != centerIndex)
+        val neighbourhoodCentroidIndices = getNeighbourIndices(centerIndex)
 
         // adjust the centroids in the neighbourhood
         neighbourhoodCentroidIndices.foreach{ index =>
@@ -239,17 +243,7 @@ class SOMKMeans (
           localCenters(centerIndex) = new VectorWithNorm(center.vector)
 
           // obtain the indices of all neighbour centroids
-          val winnerRow = centerIndex / NNDimensions
-          val winnerCol = centerIndex % NNDimensions
-          val neighbourhoodCentroidIndices =
-            (-nSize to nSize).flatMap { rowNumber =>
-              (-nSize to nSize).map { colNumber =>
-                val row = nonNegativeMod(winnerRow + rowNumber, NNDimensions)
-                val col = nonNegativeMod(winnerCol + colNumber, NNDimensions)
-                val neighbourIndex = row * NNDimensions + col
-                neighbourIndex
-              }
-            }.filter(index => index != centerIndex)
+          val neighbourhoodCentroidIndices = getNeighbourIndices(centerIndex)
 
           // adjust the centroids in the neighbourhood
           neighbourhoodCentroidIndices.foreach { index =>
