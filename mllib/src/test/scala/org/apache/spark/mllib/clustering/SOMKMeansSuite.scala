@@ -49,7 +49,6 @@ class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
     runStreams(scc, 1, 1)
     val finalCenters = model.latestModel().clusterCenters
 
-    print(s"SOM Result :${finalCenters.mkString("[", " ", "]")}\n")
     assert(finalCenters.length === 25)
 
   }
@@ -72,11 +71,10 @@ class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
     val sc = new SparkContext(conf)
     val parallelData = sc.parallelize(data)
     val seqComp = new SOMKMeans(NNDimensions, nSize, sigma, learningRate, seed)
-    seqComp.computeSequentially(parallelData)
+    seqComp.computeSequentially(parallelData.map(elem => (0, elem)))
     val seqModelClusters = seqComp.latestModel().clusterCenters
     sc.stop()
 
-    print(s"Sequential SOM Result: ${seqModelClusters.mkString("[", " ", "]")}\n")
     assert(seqModelClusters.length === 25)
 
   }
@@ -95,15 +93,15 @@ class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
     val sigma = 1.0
     val learningRate = 0.2
     val seed = 1
+    val samplingSeed = 10
 
     val sc = new SparkContext(conf)
     val parallelData = sc.parallelize(data)
     val unbiasedComp = new SOMKMeans(NNDimensions, nSize, sigma, learningRate, seed)
-    unbiasedComp.computeUnbiasedSampling(parallelData)
+    unbiasedComp.computeUnbiasedSampling(parallelData, samplingSeed)
     val unbiasedCompClusters = unbiasedComp.latestModel().clusterCenters
     sc.stop()
 
-    print(s"Unbiased SOM Result: ${unbiasedCompClusters.mkString("[", " ", "]")}\n")
     assert(unbiasedCompClusters.length === 25)
 
   }
