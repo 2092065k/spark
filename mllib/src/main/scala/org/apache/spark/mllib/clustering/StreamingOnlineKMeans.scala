@@ -114,16 +114,24 @@ class StreamingOnlineKMeans (
     this
   }
 
+  private def initialiseRandomModel(rdd: RDD[Vector]) {
+    model = new StreamingOnlineKMeansModel(
+      rdd.takeSample(true, k, new XORShiftRandom(this.seed).nextInt()).map(_.toDense),
+      Array.fill(k)(0.0))
+  }
+
   def trainOn(data: DStream[Vector]) {
     data.foreachRDD { (rdd, time) =>
 
-      // create random centers from input data if no initial ones set
-      if (model.clusterWeights == null) {
-        model = new StreamingOnlineKMeansModel(
-          rdd.takeSample(true, k, new XORShiftRandom(this.seed).nextInt()).map(_.toDense),
-          Array.fill(k)(0.0))
+      // discard empty RDDs
+      if (!rdd.isEmpty()) {
+
+        // create random centers from input data if no initial ones set
+        if (model.clusterCenters == null) {
+          initialiseRandomModel(rdd)
+        }
+        model = model.update(rdd)
       }
-      model = model.update(rdd)
     }
   }
 

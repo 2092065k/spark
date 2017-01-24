@@ -200,11 +200,16 @@ class SOMKMeans (
   def trainOn(data: DStream[Vector]) {
 
     data.foreachRDD { (rdd, time) =>
-      // create random centers from input data if no initial ones set
-      if (model == null) {
-        initialiseRandomModel(rdd)
+
+      // discard empty RDDs
+      if (!rdd.isEmpty()) {
+
+        // create random centers from input data if no initial ones set
+        if (model == null) {
+          initialiseRandomModel(rdd)
+        }
+        model = update(rdd)
       }
-      model = update(rdd)
     }
   }
 

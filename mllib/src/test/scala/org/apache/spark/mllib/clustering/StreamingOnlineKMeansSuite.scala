@@ -54,4 +54,23 @@ class StreamingOnlineKMeansSuite extends SparkFunSuite with TestSuiteBase {
     assert(finalCenters(1) ~== secondCenter absTol 1E-5)
   }
 
+  test("Streaming Online K-means safely handles empty RDDs") {
+
+    val model = new StreamingOnlineKMeans(1, 1)
+    val point = Vectors.dense(0.0, 0.0, 0.0)
+
+    val scc: StreamingContext = setupStreams(Seq(Seq(), Seq(point)),
+      (inputDStream: DStream[Vector]) => {
+      model.trainOn(inputDStream)
+      inputDStream.count()
+    })
+
+    runStreams(scc, 2, 1)
+    val finalCenters = model.latestModel().clusterCenters
+
+
+    assert(finalCenters.length === 1)
+    assert(finalCenters(0) ~== point absTol 1E-5)
+  }
+
 }

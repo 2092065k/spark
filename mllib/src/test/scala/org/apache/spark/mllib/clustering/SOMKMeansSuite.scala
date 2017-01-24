@@ -53,6 +53,23 @@ class SOMKMeansSuite extends SparkFunSuite with TestSuiteBase{
 
   }
 
+  test("SOM K-means safely handles empty RDDs") {
+
+    val point = Vectors.dense(0.0, 0.0, 0.0)
+    val model = new SOMKMeans(2, 1, 1.0, 0.2, 1)
+
+    val scc: StreamingContext = setupStreams(Seq(Seq(), Seq(point)),
+      (inputDStream: DStream[Vector]) => {
+      model.trainOn(inputDStream)
+      inputDStream.count()
+    })
+
+    runStreams(scc, 2, 1)
+    val finalCenters = model.latestModel().clusterCenters
+
+    assert(finalCenters.length === 4)
+  }
+
   test("Test the sequential version of SOM K-Means") {
 
     val data = Seq(

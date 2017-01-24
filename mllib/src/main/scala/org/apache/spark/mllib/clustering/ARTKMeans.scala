@@ -75,6 +75,9 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
   private def normalizeVector(x: Vector, max: Vector, min: Vector): VectorWithNorm = {
 
+    // edge case where all the data is converged at the same point
+    if (max.equals(min)) {return new VectorWithNorm(x)}
+
     val size = x.size
     var z = Array[Double]()
     for(a <- 0 until size) {
@@ -138,7 +141,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     val localMax = data.reduce{ case(x, y) => getLargerParts(x, y) }
     val localMin = data.reduce{ case(x, y) => getSmallestParts(x, y) }
 
-    if(globalMax == null || localMax == null) {
+    if(globalMax == null || globalMin == null) {
       globalMax = localMax
       globalMin = localMin
     }
@@ -174,7 +177,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     val bcCenters = sc.broadcast(clusterCenters)
     val bcWeights = sc.broadcast(clusterWeights)
     val initialCenterCount = clusterCenters.length
-    val dims = data.take(1).head.vector.size
+    val dims = clusterCenters(0).vector.size
     val vigilance = a * dims
 
     val closestCenterIndices = data.map(point => KMeans.findClosest(clusterCenters, point)._1)
@@ -256,7 +259,11 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
   def trainOn(data: DStream[Vector]) {
     data.foreachRDD { (rdd, time) =>
-      model = update(rdd)
+
+      // discard empty RDDs
+      if (!rdd.isEmpty()) {
+        model = update(rdd)
+      }
     }
   }
 
