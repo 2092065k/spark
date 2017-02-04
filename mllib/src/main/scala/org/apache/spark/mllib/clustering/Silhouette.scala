@@ -44,6 +44,8 @@ class Silhouette(
     require(model != null, "The Model has not been set")
     require(data != null, "The input points data has not been set")
 
+    val sc = data.context
+
     val centerNorms = model.clusterCenters.map(Vectors.norm(_, 2.0))
     val processedCenters = model.clusterCenters.zip(centerNorms).map { case (v, norm) =>
       new VectorWithNorm(v, norm)
@@ -61,13 +63,14 @@ class Silhouette(
     val closestCenterData = processedData.map( point => KMeans.findClosest(processedCenters, point))
     val pointsWithCenterInfo = processedData.zip(closestCenterData)
 
-    val collectedPointInfo = pointsWithCenterInfo.collect()
+    val collectedPointInfoBroadcast = sc.broadcast(pointsWithCenterInfo.collect())
 
     val silhouettes = pointsWithCenterInfo.map{ pointInfo =>
 
       val point = pointInfo._1
       val closestCenterIndex = pointInfo._2._1
       val neighbouringCenterIndex = closestCenterPairs(closestCenterIndex)
+      val collectedPointInfo = collectedPointInfoBroadcast.value
 
       val pointsInLocalCluster = collectedPointInfo.filter(elem =>
         elem._2._1 == closestCenterIndex).map(elem => elem._1)
