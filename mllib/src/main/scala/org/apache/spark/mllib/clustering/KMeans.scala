@@ -586,15 +586,8 @@ object KMeans {
 
     val dims = source(0).vector.size
     val localVectors = Array.fill(source.length)(Vectors.zeros(dims))
-
     source.zipWithIndex.foreach{ elem => axpy(1.0, elem._1.vector, localVectors(elem._2))}
-
-    val norms = localVectors.map(Vectors.norm(_, 2.0))
-    val localCentersWithNorms = localVectors.zip(norms).map { case (v, norm) =>
-      new VectorWithNorm(v, norm)
-    }
-
-    localCentersWithNorms
+    localVectors.map(new VectorWithNorm(_))
   }
 
   /**
