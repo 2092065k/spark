@@ -30,7 +30,7 @@ class OnlineKMeansSuite extends SparkFunSuite with MLlibTestSparkContext{
       Vectors.dense(2.0, 2.0, 2.0),
       Vectors.dense(8.0, 8.0, 8.0),
       Vectors.dense(10.0, 10.0, 10.0)
-    ))
+    ), 1)
 
     val numClusters = 2
     val seed = 1

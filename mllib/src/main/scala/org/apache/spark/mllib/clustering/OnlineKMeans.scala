@@ -47,15 +47,15 @@ class OnlineKMeans private (
     data: RDD[VectorWithNorm]): KMeansModel = {
 
     val sc = data.sparkContext
+    val numPartitions = data.getNumPartitions
+    val inactivePartitions = sc.longAccumulator
     val centers = data.takeSample(true, k, new XORShiftRandom(this.seed).nextInt()).map(_.toDense)
     val dims = centers.head.vector.size
     val bcCenters = sc.broadcast(centers)
 
-    val finalCenters = data.mapPartitions { points =>
+    val partialSolutionCenters = data.mapPartitions { points =>
 
       val localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
-
-      val centerValues = Array.fill(localCenters.length)(Vectors.zeros(dims))
       val weights = Array.fill(localCenters.length)(0.0)
 
       points.foreach{ point =>
@@ -72,27 +72,40 @@ class OnlineKMeans private (
         axpy(1.0, contrib, center)
         val centerResult = new VectorWithNorm(center)
         localCenters(centerIndex) = centerResult
-        centerValues(centerIndex) = centerResult.vector
       }
 
-      weights.indices.filter(weights(_) > 0).map(j => (j, (centerValues(j), weights(j)))).iterator
-    }.reduceByKey { case ((centValue1, count1), (centValue2, count2)) =>
-      val count = count1 + count2
-      scal(count1/count, centValue1)
-      scal(count2/count, centValue2)
-      axpy(1.0, centValue2, centValue1)
-      (centValue1, count)
+      if(weights.sum == 0) {
+        inactivePartitions.add(1)
+        Array().iterator
+      }
+      else {
+        weights.indices.map(j => (localCenters(j), weights(j))).iterator
+      }
     }.collect()
 
-    finalCenters.foreach{ centerInfo =>
+    val activePartitions = numPartitions - inactivePartitions.value.toInt
+    var uncombinedCenters = partialSolutionCenters
 
-      val centerIndex = centerInfo._1
-      val newCenterValue = centerInfo._2._1
+    val completeSolutionCenters = (0 until k).toArray.map{ centerNum =>
+      val partialCenter = uncombinedCenters(0)
+      val partialCenters = uncombinedCenters.sortBy(elem =>
+        KMeans.fastSquaredDistance(elem._1, partialCenter._1)).take(activePartitions)
 
-      centers(centerIndex) = new VectorWithNorm(newCenterValue)
+      uncombinedCenters = uncombinedCenters.filter(!partialCenters.contains(_))
+      val convertedPartialCenters = partialCenters.map(elem => (elem._1.vector, elem._2))
+
+      convertedPartialCenters.reduce { (elem1, elem2) =>
+        val count = elem1._2 + elem2._2
+        if (count != 0) {
+          scal(elem1._2 / count, elem1._1)
+          scal(elem2._2 / count, elem2._1)
+          axpy(1.0, elem2._1, elem1._1)
+        }
+        (elem1._1, count)
+      }._1
     }
 
-    new KMeansModel(centers.map(_.vector))
+    new KMeansModel(completeSolutionCenters)
 
   }
 

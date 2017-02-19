@@ -57,7 +57,7 @@ class SilhouetteSuite extends SparkFunSuite with TestSuiteBase{
       Vectors.dense(2.0, 2.0, 2.0),
       Vectors.dense(8.0, 8.0, 8.0),
       Vectors.dense(10.0, 10.0, 10.0)
-    ))
+    ), 1)
 
     // obtain a model from online K-Means
     val numClusters = 2
