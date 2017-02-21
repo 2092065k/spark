@@ -72,4 +72,70 @@ class ARTKMeansSuite extends SparkFunSuite with TestSuiteBase{
     assert(finalCenters(0) ~== point absTol 1E-5)
   }
 
+  test("ART K-Means with three centers") {
+
+    val data = Seq(
+      Vectors.dense(0.0, 0.0, 0.0),
+      Vectors.dense(10.0, 10.0, 10.0),
+      Vectors.dense(20.0, 20.0, 20.0)
+    )
+
+    val percentageOfSpace = 0.24
+    val model = new ARTKMeans(percentageOfSpace)
+
+    val scc: StreamingContext = setupStreams(Seq(data), (inputDStream: DStream[Vector]) => {
+      model.trainOn(inputDStream)
+      inputDStream.count()
+    })
+
+    runStreams(scc, 1, 1)
+    val finalCenters = model.latestModel().clusterCenters
+
+    val firstCenter = Vectors.dense(0.0, 0.0, 0.0)
+    val secondCenter = Vectors.dense(10.0, 10.0, 10.0)
+    val thirdCenter = Vectors.dense(20.0, 20.0, 20.0)
+
+    assert(finalCenters.length === 3)
+    assert(finalCenters(0) ~== firstCenter absTol 1E-5)
+    assert(finalCenters(1) ~== secondCenter absTol 1E-5)
+    assert(finalCenters(2) ~== thirdCenter absTol 1E-5)
+
+  }
+
+  test("ART K-Means with three logical centers") {
+
+    val data = Seq(
+      Vectors.dense(-2.0, -2.0, -2.0),
+      Vectors.dense(0.0, 0.0, 0.0),
+      Vectors.dense(2.0, 2.0, 2.0),
+      Vectors.dense(8.0, 8.0, 8.0),
+      Vectors.dense(10.0, 10.0, 10.0),
+      Vectors.dense(12.0, 12.0, 12.0),
+      Vectors.dense(18.0, 18.0, 18.0),
+      Vectors.dense(20.0, 20.0, 20.0),
+      Vectors.dense(22.0, 22.0, 22.0)
+    )
+
+    val percentageOfSpace = 0.11
+    val model = new ARTKMeans(percentageOfSpace)
+
+    val scc: StreamingContext = setupStreams(Seq(data), (inputDStream: DStream[Vector]) => {
+      model.trainOn(inputDStream)
+      inputDStream.count()
+    })
+
+    runStreams(scc, 1, 1)
+    val finalCenters = model.latestModel().clusterCenters
+
+    val firstCenter = Vectors.dense(0.0, 0.0, 0.0)
+    val secondCenter = Vectors.dense(10.0, 10.0, 10.0)
+    val thirdCenter = Vectors.dense(20.0, 20.0, 20.0)
+
+    assert(finalCenters.length === 3)
+    assert(finalCenters(0) ~== firstCenter absTol 1E-5)
+    assert(finalCenters(1) ~== secondCenter absTol 1E-5)
+    assert(finalCenters(2) ~== thirdCenter absTol 1E-5)
+
+  }
+
 }
