@@ -87,10 +87,6 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     new VectorWithNorm(z)
   }
 
-  /**
-    * Combination of the centers works through performing a sequential
-    * ARTKMeans clustering on the center points themselves
-    */
   private def combineCenters(max: Vector, min: Vector, a: Double) {
 
     var newClusterCenters: Array[VectorWithNorm] = Array()
@@ -98,36 +94,52 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     val dims = clusterCenters(0).vector.size
     val vigilance = a * dims
 
-    // take one of the old centers as an initial center
-    newClusterCenters = newClusterCenters :+ clusterCenters(0)
-    newClusterWeights = newClusterWeights :+ 0.0
+    var centersWithIndices = clusterCenters.zipWithIndex
+    var centerWeightsWithIndices = clusterWeights.zipWithIndex
 
-    clusterCenters.zipWithIndex.foreach{ case(point, index) =>
+    while (centersWithIndices.nonEmpty) {
 
-      val (centerIndex, distance) = KMeans.findClosest(newClusterCenters, point)
-      val closestCenter = newClusterCenters(centerIndex).vector
-      val normalizedPoint = normalizeVector(point.vector, max, min)
-      val normalizedCenter = normalizeVector(closestCenter, max, min)
-      val dist = KMeans.fastSquaredDistance(normalizedPoint, normalizedCenter)
+      // take one of the old centers and find all that are within vigilance distance
+      val normalizedPoint = normalizeVector(centersWithIndices(0)._1.vector, max, min)
+      val normalizedCentersToMerge = centersWithIndices.map{case (point, index) =>
+        (normalizeVector(point.vector, max, min), index)
+      }
 
-      if(dist < vigilance) {
+      val withinVigilanceCenters = normalizedCentersToMerge.filter{case (point, index) =>
+        KMeans.fastSquaredDistance(point, normalizedPoint) < vigilance
+      }
 
-        val newWeight = newClusterWeights(centerIndex) + clusterWeights(index)
+      val centersToMergeIndices = withinVigilanceCenters.map(elem => elem._2)
 
-        // check is necessary to overcome initial center placement
-        if(newWeight != 0) {
-          val contrib = new DenseVector(Array.fill(dims)(0.0))
-          axpy(clusterWeights(index) / newWeight, point.vector, contrib)
-          scal(newClusterWeights(centerIndex) / newWeight, closestCenter)
-          axpy(1.0, contrib, closestCenter)
-          newClusterCenters(centerIndex) = new VectorWithNorm(closestCenter)
-          newClusterWeights(centerIndex) = newWeight
+      val centersToMerge = centersWithIndices.filter{case (point, index) =>
+        centersToMergeIndices.contains(index)
+      }.map(elem => elem._1)
+
+      val centerWeightsToMerge = centerWeightsWithIndices.filter{case (weight, index) =>
+        centersToMergeIndices.contains(index)
+      }.map(elem => elem._1)
+
+      val centersWithWeightsToMerge = centersToMerge.zip(centerWeightsToMerge)
+
+      val mergedPointInfo = centersWithWeightsToMerge.reduce{ (elem1, elem2) =>
+        val count = elem1._2 + elem2._2
+        if (count != 0) {
+          scal(elem1._2 / count, elem1._1.vector)
+          scal(elem2._2 / count, elem2._1.vector)
+          axpy(1.0, elem2._1.vector, elem1._1.vector)
         }
+        (new VectorWithNorm(elem1._1.vector), count)
       }
-      else {
-        newClusterCenters = newClusterCenters :+ point
-        newClusterWeights = newClusterWeights :+ clusterWeights(index)
-      }
+
+      newClusterCenters = newClusterCenters :+ mergedPointInfo._1
+      newClusterWeights = newClusterWeights :+ mergedPointInfo._2
+
+      centersWithIndices = centersWithIndices.filter(elem =>
+        !centersToMergeIndices.contains(elem._2))
+
+      centerWeightsWithIndices = centerWeightsWithIndices.filter(elem =>
+        !centersToMergeIndices.contains(elem._2))
+
     }
 
     clusterCenters = newClusterCenters
