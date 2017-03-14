@@ -42,7 +42,7 @@ class OnlineKMeans private (
    */
   private def run(data: RDD[Vector]): KMeansModel = {
 
-    // Compute squared norms and cache them.
+    // Compute squared norms and cache them
     val norms = data.map(Vectors.norm(_, 2.0))
     norms.persist()
 

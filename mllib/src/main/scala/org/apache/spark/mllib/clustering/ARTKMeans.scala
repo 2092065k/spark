@@ -23,6 +23,12 @@ import org.apache.spark.mllib.linalg.BLAS.{axpy, scal}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.dstream.DStream
 
+/**
+ * ART K-means clustering with periodic updates to the state of the model,
+ * initialized by batches of data produced by a DStream.
+ *
+ * @param a the percentage of the maximum possible vigilance value
+ */
 class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
   protected var clusterCenters: Array[VectorWithNorm] = Array()
@@ -31,17 +37,32 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
   protected var globalMin: Vector = null
   protected var model = new KMeansModel(clusterCenters.map(_.vector))
 
+  /**
+   * Return the percentage of the maximum possible vigilance value
+   */
   def getA: Double = a
 
+  /**
+   * Set the percentage of the maximum possible vigilance value
+   */
   def setA(a: Double) {
     require(a > 0.0 && a <= 1.0, s"Vigilance percentage needs to be between 0 and 1 but got ${a}")
     this.a = a
   }
 
+  /**
+   * Return the latest state of the model.
+   */
   def latestModel(): KMeansModel = {
     model
   }
 
+  /**
+   * Manually initialize a collection of centroids by providing explicit values.
+   *
+   * @param centers The starting coordinates of the K centroids.
+   * @param weights The starting weights of the K centroids.
+   */
   def setInitialCenters(centers: Array[Vector], weights: Array[Double]): this.type = {
     require(centers.size == weights.size,
       "Number of initial centers must be equal to number of weights")
@@ -53,6 +74,9 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     this
   }
 
+  /**
+   * Obtain the larger value of each dimension between two vectors
+   */
   private def getLargerParts(x: Vector, y: Vector): Vector = {
     val size = x.size
     var z = Array[Double]()
@@ -63,6 +87,9 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     new DenseVector(z)
   }
 
+  /**
+   * Obtain the smallest value of each dimension between two vectors
+   */
   private def getSmallestParts(x: Vector, y: Vector): Vector = {
     val size = x.size
     var z = Array[Double]()
@@ -73,6 +100,14 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     new DenseVector(z)
   }
 
+  /**
+   * Normalize a given vector to fit within the confines of a unit hypercube
+   *
+   * @param x the vector to be normalized
+   * @param max the maximum possible value of each dimension
+   * @param min the minimum possible value of each dimension
+   * @return the normalized form of vector x
+   */
   private def normalizeVector(x: Vector, max: Vector, min: Vector): VectorWithNorm = {
 
     // edge case where all the data is converged at the same point
@@ -87,6 +122,13 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     new VectorWithNorm(z)
   }
 
+  /**
+   * For each considered centroid, identify all other centroids, whose normalised forms
+   * have a smaller squared distance from the considered centroid than the vigilance value.
+   * Then, perform a weighted average to merge all centroids in that group (including the
+   * staring one). After all centroids have been considered, replace the centroids of the
+   * k-means model with the merged ones.
+   */
   private def combineCenters(max: Vector, min: Vector, a: Double) {
 
     var newClusterCenters: Array[VectorWithNorm] = Array()
@@ -105,6 +147,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
         (normalizeVector(point.vector, max, min), index)
       }
 
+      // filter out all centroids that are too far away
       val withinVigilanceCenters = normalizedCentersToMerge.filter{case (point, index) =>
         KMeans.fastSquaredDistance(point, normalizedPoint) < vigilance
       }
@@ -121,6 +164,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
       val centersWithWeightsToMerge = centersToMerge.zip(centerWeightsToMerge)
 
+      // perform a wighted average over the identified group of close by centroids
       val mergedPointInfo = centersWithWeightsToMerge.reduce{ (elem1, elem2) =>
         val count = elem1._2 + elem2._2
         if (count != 0) {
@@ -142,11 +186,17 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
     }
 
+    // reassign the centroids of the model
     clusterCenters = newClusterCenters
     clusterWeights = newClusterWeights
 
   }
 
+  /**
+   * Update the state of the model in response to the latest batch of data.
+   *
+   * @param data Training points as an `RDD` of `Vector` types.
+   */
   private def update(data: RDD[Vector]): KMeansModel = {
 
     // recompute new min and max
@@ -161,6 +211,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     globalMax = getLargerParts(globalMax, localMax)
     globalMin = getSmallestParts(globalMin, localMin)
 
+    // Compute squared norms and cache them
     val norms = data.map(Vectors.norm(_, 2.0))
     norms.persist()
 
@@ -183,6 +234,13 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     new KMeansModel(clusterCenters.map(centerWithNorm => centerWithNorm.vector))
   }
 
+  /**
+   * Implementation of the ART K-Means algorithm.
+   *
+   * @param data Training points as an `RDD` of `VectorWithNorm` types.
+   * @param max The maximum possible values of every observed dimension
+   * @param min The minimum possible values of every observed dimension
+   */
   private def runAlgorithm(data: RDD[VectorWithNorm], max: Vector, min: Vector) {
 
     val sc = data.sparkContext
@@ -192,6 +250,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     val dims = clusterCenters(0).vector.size
     val vigilance = a * dims
 
+    // partition the observations based on their proximity to an existing centroid
     val closestCenterIndices = data.map(point => KMeans.findClosest(clusterCenters, point)._1)
     val closestPairs = closestCenterIndices.zip(data)
 
@@ -224,6 +283,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
 
           if(dist < vigilance) {
 
+            // add the contribution of one point
             weights(centerIndex) += 1
             val contrib = new DenseVector(Array.fill(dims)(0.0))
             axpy(1.0, point.vector, contrib)
@@ -235,6 +295,8 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
             centersValue(centerIndex) = centerResult.vector
           }
           else {
+
+            // create a new centroid at the location fo the considered point
             localCenters = localCenters :+ point
             localWeights = localWeights :+ 1.0
             centersValue = centersValue :+ point.vector
@@ -245,6 +307,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
       weights.indices.filter(weights(_) > 0).map(j => (j, (centersValue(j), weights(j)))).iterator
     }.collect()
 
+    // update the state of the clustering model of centroids
     final_centers_and_weights.foreach { centerInfo =>
       val centerIndex = centerInfo._1
       val newCenterValue = centerInfo._2._1
@@ -269,6 +332,11 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
     combineCenters(globalMax, globalMin, a/2.0)
   }
 
+  /**
+   * Update the clustering model by training it on batches of data from a DStream.
+   *
+   * @param data DStream containing vector data
+   */
   def trainOn(data: DStream[Vector]) {
     data.foreachRDD { (rdd, time) =>
 

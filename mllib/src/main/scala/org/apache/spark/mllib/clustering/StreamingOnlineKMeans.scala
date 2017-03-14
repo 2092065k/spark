@@ -33,7 +33,7 @@ class StreamingOnlineKMeansModel(
     val clusterWeights: Array[Double]) extends KMeansModel(clusterCenters) with Logging {
 
   /**
-   * Update the state of the model in response to the lates batch of data.
+   * Update the state of the model in response to the latest batch of data.
    *
    * @param data Training points as an `RDD` of `Vector` types.
    */
