@@ -21,23 +21,52 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.rdd.RDD
 
-
+/**
+ * Silhouette is a method of interpretation and validation of consistency
+ * within clusters of data. It offers a clear and simple way of representing
+ * how well each data point lies within its cluster - a value in the range [-1, 1]
+ * where 1 indicates a perfect cluster assignment, 0 is indifference and -1 indicating
+ * a completely wrong assignment.
+ *
+ * @param model the cluster model which will be evaluated
+ * @param data the date, whose Silhouette value will be measured
+ */
 class Silhouette(
     private var model: KMeansModel = null,
     private var data: RDD[Vector] = null) extends Serializable with Logging {
 
+  /**
+   * Return the model used for evaluation.
+   */
   def getModel: KMeansModel = model
 
+  /**
+   * Set a model to be evaluated.
+   */
   def setModel(model: KMeansModel) {
     this.model = model
   }
 
+  /**
+   * Return the used collection of data.
+   */
   def getData: RDD[Vector] = data
 
+  /**
+   * Set the collection of data, whose Silhouette value will be measured.
+   */
   def setData(data: RDD[Vector]) {
     this.data = data
   }
 
+  /**
+   * Implementation of the Silhouette algorithm.
+   *
+   * @param model the cluster model which will be evaluated
+   * @param data  the date, whose Silhouette value will be measured
+   * @return a collection of tuples of the form (centroid index,
+   *   number of points in the cluster, average Silhouette value of the points in the cluster)
+   */
   def runAnalysis(model: KMeansModel = model, data: RDD[Vector] = data):
     Array[(Int, Int, Double)] = {
 
@@ -46,11 +75,13 @@ class Silhouette(
 
     val sc = data.context
 
+    // Compute squared norms of the centroids in the model
     val centerNorms = model.clusterCenters.map(Vectors.norm(_, 2.0))
     val processedCenters = model.clusterCenters.zip(centerNorms).map { case (v, norm) =>
       new VectorWithNorm(v, norm)
     }
 
+    // Compute squared norms of the points in the clusters
     val pointNorms = data.map(Vectors.norm(_, 2.0))
     val processedData = data.zip(pointNorms).map { case (v, norm) =>
       new VectorWithNorm(v, norm)
@@ -65,6 +96,7 @@ class Silhouette(
 
     val collectedPointInfoBroadcast = sc.broadcast(pointsWithCenterInfo.collect())
 
+    // compute the silhouette value of each point
     val silhouettes = pointsWithCenterInfo.map{ pointInfo =>
 
       val point = pointInfo._1
@@ -96,6 +128,9 @@ class Silhouette(
 
   }
 
+  /**
+   * Computes the dissimilarity of a given point with a specified cluster.
+   */
   private def clusterDissimilarity(
       clusterPoints: Array[VectorWithNorm],
       point: VectorWithNorm): Double = {
@@ -104,6 +139,13 @@ class Silhouette(
     distances.sum/distances.length
   }
 
+  /**
+   * For a given centroid, identify the closest different centroid.
+   *
+   * @param center the centroid, whose closest neighbour is being searched for
+   * @param allCenters all centroids present in the model
+   * @return a tuple containing the indices of the considered centroid and its closest neighbour
+   */
   private def getClosestCenterPair(
       center: VectorWithNorm,
       allCenters: Array[VectorWithNorm]): (Int, Int) = {

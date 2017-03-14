@@ -108,8 +108,8 @@ class OnlineKMeans private (
     val activePartitions = numPartitions - inactivePartitions.value.toInt
     var uncombinedCenters = partialSolutionCenters
 
-    // give N actives partitions that each produced K tuples as output
-    // merger with a weighted average each group of N closest centroids
+    // given N active partitions that each produced K tuples as output
+    // merge with a weighted average each group of N closest centroids
     val completeSolutionCenters = (0 until k).toArray.map{ centerNum =>
       val partialCenter = uncombinedCenters(0)
       val partialCenters = uncombinedCenters.sortBy(elem =>
