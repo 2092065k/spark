@@ -24,7 +24,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.dstream.DStream
 
 /**
- * ART K-means clustering with periodic updates to the state of the model,
+ * Adaptive Resonance Theory K-means clustering with periodic updates to the state of the model,
  * initialized by batches of data produced by a DStream.
  *
  * @param a the percentage of the maximum possible vigilance value
@@ -38,12 +38,12 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
   protected var model = new KMeansModel(clusterCenters.map(_.vector))
 
   /**
-   * Return the percentage of the maximum possible vigilance value
+   * Return the percentage of the maximum possible vigilance value.
    */
   def getA: Double = a
 
   /**
-   * Set the percentage of the maximum possible vigilance value
+   * Set the percentage of the maximum possible vigilance value.
    */
   def setA(a: Double) {
     require(a > 0.0 && a <= 1.0, s"Vigilance percentage needs to be between 0 and 1 but got ${a}")
@@ -75,7 +75,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
   }
 
   /**
-   * Obtain the larger value of each dimension between two vectors
+   * Obtain the larger value of each dimension between two vectors.
    */
   private def getLargerParts(x: Vector, y: Vector): Vector = {
     val size = x.size
@@ -88,7 +88,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
   }
 
   /**
-   * Obtain the smallest value of each dimension between two vectors
+   * Obtain the smallest value of each dimension between two vectors.
    */
   private def getSmallestParts(x: Vector, y: Vector): Vector = {
     val size = x.size
@@ -101,7 +101,7 @@ class ARTKMeans (private var a: Double)  extends Logging with Serializable {
   }
 
   /**
-   * Normalize a given vector to fit within the confines of a unit hypercube
+   * Normalize a given vector to fit within the confines of a unit hypercube.
    *
    * @param x the vector to be normalized
    * @param max the maximum possible value of each dimension

@@ -26,6 +26,16 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.util.random.XORShiftRandom
 
+/**
+ * Self-Organizing Maps K-means clustering with periodic updates to the state of the model,
+ * initialized by batches of data produced by a DStream.
+ *
+ * @param NNDimensions the dimension of the square SOM lattice
+ * @param nSize size of the neighbourhood
+ * @param sigma a tuning parameter
+ * @param learningRate the percentage of influence a new point has on a centroid
+ * @param seed random seed for cluster initialization
+ */
 class SOMKMeans (
     var NNDimensions: Int,
     var nSize: Int,
@@ -36,16 +46,28 @@ class SOMKMeans (
   var clusterCenters: Array[VectorWithNorm] = null
   var model: KMeansModel = null
 
+  /**
+   * Return the dimension of the square SOM lattice.
+   */
   def getNNDimensions: Int = NNDimensions
 
+  /**
+   * Set the dimension of the square SOM lattice.
+   */
   def setNNDimensions(NNDimensions: Int) {
     require(NNDimensions > 0,
       s"The dimensions of the neural network must be positive but got ${NNDimensions}")
     this.NNDimensions = NNDimensions
   }
 
+  /**
+   * Return the size of the neighbourhood.
+   */
   def getNSize: Int = nSize
 
+  /**
+   * Set the size of the neighbourhood.
+   */
   def setNSize(nSize: Int) {
     require(nSize >= 0,
       s"The size of the neighbourhood must be non-negative but got ${nSize}")
@@ -55,28 +77,49 @@ class SOMKMeans (
     this.nSize = nSize
   }
 
+  /**
+   * Return the tuning parameter.
+   */
   def getSigma: Double = sigma
 
+  /**
+   * Set the tuning parameter.
+   */
   def setSigma(sigma: Double) {
     require(sigma >= 1,
       s"Sigma must be a real number grater or equal to 1 but got ${sigma}")
     this.sigma = sigma
   }
 
+  /**
+   * Return the percentage of influence a new point has on a centroid.
+   */
   def getLearningRate: Double = learningRate
 
+  /**
+   * Set the percentage of influence a new point has on a centroid.
+   */
   def setLearningRate(learningRate: Double) {
     require(learningRate >= 0 && learningRate <= 1,
       s"The learning rate must be a real number between 0 and 1 ${learningRate}")
     this.nSize = nSize
   }
 
+  /**
+   * Return the value of the seed used for random centroid initialization.
+   */
   def getSeed: Long = seed
 
+  /**
+   * Set the value of the seed used for random centroid initialization.
+   */
   def setSeed(seed: Long) {
     this.seed = seed
   }
 
+  /**
+    * Manually initialize NNDimensions * NNDimensions centroids by providing starting coordinates.
+    */
   def setInitialCenters(centers: Array[Vector]): this.type = {
     require(centers.size == NNDimensions * NNDimensions,
       s"Number of initial centers must be ${NNDimensions * NNDimensions} but got ${centers.size}")
@@ -85,8 +128,15 @@ class SOMKMeans (
     this
   }
 
+  /**
+   * Return the latest state of the model.
+   */
   def latestModel(): KMeansModel = model
 
+  /**
+   * Initialize the NNDimensions * NNDimensions centroids randomly by
+   * sampling the first RDD from the DStream.
+   */
   private def initialiseRandomModel(rdd: RDD[Vector]) {
 
     val numCenters = NNDimensions * NNDimensions
@@ -95,15 +145,28 @@ class SOMKMeans (
     model = new KMeansModel(randomCenters)
   }
 
+  /**
+   * A non-negative modulo operation.
+   */
   private def nonNegativeMod(x: Int, y: Int): Int = {
     ((x % y) + y) % y
   }
 
+  /**
+   * Calculate the impact of the neighbourhood.
+   */
   private def neighbourhoodImpact (x: VectorWithNorm, y: VectorWithNorm) : Double = {
     val squaredDistance = KMeans.fastSquaredDistance(x, y)
     math.exp(-sigma * squaredDistance)
   }
 
+  /**
+   * Using the size of the neighbourhood, compute the indices of all
+   * centroids in the one dimensional array of cluster centers, who belong to
+   * the neighbourhood of the "winning" centroid.
+   *
+   * @param centerIndex the index of the centroid, whose neighbourhood we are trying to compute
+   */
   private def getNeighbourIndices(centerIndex: Int): Seq[Int] = {
     val winnerRow = centerIndex / NNDimensions
     val winnerCol = centerIndex % NNDimensions
@@ -118,8 +181,14 @@ class SOMKMeans (
     }.filter(index => index != centerIndex)
   }
 
+  /**
+   * Update the state of the model in response to the latest batch of data.
+   *
+   * @param data Training points as an `RDD` of `Vector` types
+   */
   private def update(data: RDD[Vector]): KMeansModel = {
 
+    // Compute squared norms and cache them
     val norms = data.map(Vectors.norm(_, 2.0))
     norms.persist()
 
@@ -127,19 +196,23 @@ class SOMKMeans (
       new VectorWithNorm(v, norm)
     }
 
-
     val model = runAlgorithm(zippedData)
     norms.unpersist()
 
     model
   }
 
+  /**
+   * Implementation of the SOM K-Means algorithm.
+   */
   private def runAlgorithm(data: RDD[VectorWithNorm]): KMeansModel = {
 
     val sc = data.sparkContext
     val bcCenters = sc.broadcast(clusterCenters)
     val dims = clusterCenters(0).vector.size
 
+    // partition the given data randomly and run a sequential
+    // version of the algorithm for each partition
     val final_centers_and_weights = data.mapPartitions { points =>
 
       val localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
@@ -180,6 +253,8 @@ class SOMKMeans (
       addedWeights.indices.filter(addedWeights(_) > 0).map(j =>
         (j, (localCenters(j), addedWeights(j)))).iterator
     }.reduceByKey{ case ((center1, addedCount1), (center2, addedCount2)) =>
+
+      // merge centroids with identical indices with a weighted average
       val addedCount = addedCount1 + addedCount2
       scal(addedCount1/addedCount, center1.vector)
       scal(addedCount2/addedCount, center2.vector)
@@ -187,6 +262,7 @@ class SOMKMeans (
       (center1, addedCount)
     }.collect()
 
+    // update the value of centroids that were influenced by the latest observations
     final_centers_and_weights.foreach{ centerInfo =>
       val centerIndex = centerInfo._1
       val newCenterValue = centerInfo._2._1
@@ -197,6 +273,14 @@ class SOMKMeans (
 
   }
 
+  /**
+   * Update the clustering model by training it on batches of data from a DStream.
+   * Before data can be used for training, the method checks if the centroids
+   * have been initialized. If this is not the case, the first RDD from the DStream
+   * is randomly sampled to provide NNDimensions * NNDimensions initial coordinates.
+   *
+   * @param data DStream containing vector data
+   */
   def trainOn(data: DStream[Vector]) {
 
     data.foreachRDD { (rdd, time) =>
@@ -214,8 +298,8 @@ class SOMKMeans (
   }
 
   /**
-    * A sequential version of the algorithm for comparison purposes
-    * The computation is still performed on the cluster
+    * A sequential version of the SOM K-Means algorithm for comparison purposes.
+    * The computation is still performed on the cluster.
     */
   def computeSequentially(data: RDD[(Int, Vector)]) {
 
@@ -225,6 +309,7 @@ class SOMKMeans (
     val dims = clusterCenters(0).vector.size
     val bcCenters = sc.broadcast(clusterCenters)
 
+    // all data points have an identical key, so all data is placed in one partition
     val newCenters = data.groupByKey().mapPartitions{ points =>
 
       var localCenters: Array[VectorWithNorm] = Array()
@@ -273,8 +358,8 @@ class SOMKMeans (
   }
 
   /**
-    * Compute SOM sequentially from a single data partition with
-    * unbiased data sampling
+    * Compute SOM K-Means sequentially from a single data partition with
+    * unbiased data sampling.
     */
   def computeUnbiasedSampling(data: RDD[Vector], seed: Int) {
 

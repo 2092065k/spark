@@ -122,7 +122,7 @@ class StreamingOnlineKMeans (
   def getSeed: Long = seed
 
   /**
-   * Set the value of the seed uesd for random centroid initialization.
+   * Set the value of the seed used for random centroid initialization.
    */
   def setSeed(seed: Long) {
     this.seed = seed
