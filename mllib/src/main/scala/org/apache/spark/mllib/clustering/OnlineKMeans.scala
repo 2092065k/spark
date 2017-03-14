@@ -136,7 +136,7 @@ class OnlineKMeans private (
 }
 
 /**
- * Top level object for caling Online K-means clustering
+ * Top level object for calling Online K-means clustering
  */
 object OnlineKMeans {
 
