@@ -23,10 +23,23 @@ import org.apache.spark.mllib.linalg.BLAS.{axpy, scal}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.random.XORShiftRandom
 
+/**
+ * Online K-means clustering with random centroid initialization.
+ *
+ * This algorithm performs a single pass over the supplied data.
+ *
+ * @param k the desired number of centroids.
+ * @param seed a parameter used in the random sampling of the RDD to
+  *            obtain coordinates for the initial centroids.
+ */
 class OnlineKMeans private (
     private var k: Int,
     private var seed: Long) extends Serializable with Logging {
 
+  /**
+   * Transform the provided RDD of vectors into an RDD of
+   * VectorWithNorm objects and launch the algorithm.
+   */
   private def run(data: RDD[Vector]): KMeansModel = {
 
     // Compute squared norms and cache them.
@@ -43,6 +56,12 @@ class OnlineKMeans private (
     model
   }
 
+  /**
+   * Implementation of the Online K-Means algorithm.
+   *
+   * @param data the supplied data to be clustered.
+   * @return a KMeansModel object, holding the final locations of the K centroids
+   */
   private def runAlgorithm(
     data: RDD[VectorWithNorm]): KMeansModel = {
 
@@ -53,6 +72,8 @@ class OnlineKMeans private (
     val dims = centers.head.vector.size
     val bcCenters = sc.broadcast(centers)
 
+    // partition the given data randomly and run a sequential
+    // version of the algorithm for each partition
     val partialSolutionCenters = data.mapPartitions { points =>
 
       val localCenters = KMeans.deepCopyVectorWithNormArray(bcCenters.value)
@@ -83,9 +104,12 @@ class OnlineKMeans private (
       }
     }.collect()
 
+    // determine the number of partitions that operated on the given data
     val activePartitions = numPartitions - inactivePartitions.value.toInt
     var uncombinedCenters = partialSolutionCenters
 
+    // give N actives partitions that each produced K tuples as output
+    // merger with a weighted average each group of N closest centroids
     val completeSolutionCenters = (0 until k).toArray.map{ centerNum =>
       val partialCenter = uncombinedCenters(0)
       val partialCenters = uncombinedCenters.sortBy(elem =>
@@ -111,8 +135,19 @@ class OnlineKMeans private (
 
 }
 
+/**
+ * Top level object for caling Online K-means clustering
+ */
 object OnlineKMeans {
 
+  /**
+   * Trains an online k-means model.
+   *
+   * @param data Training points as an `RDD` of `Vector` types.
+   * @param k Number of clusters to create.
+   * @param seed Random seed for cluster initialization.
+   * @return
+   */
   def train(
      data: RDD[Vector],
      k: Int,
